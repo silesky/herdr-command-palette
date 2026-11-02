@@ -5,6 +5,11 @@ min_herdr_version = "0.7.5"
 description = "Fuzzy palette over every Herdr action, showing the shortcut beside each one."
 platforms = ["macos", "linux"]
 
+# The plugin is a Rust binary at bin/herdr-palette, built from source on install.
+[[build]]
+command = ["sh", "scripts/build.sh"]
+platforms = ["macos", "linux"]
+
 [[panes]]
 id = "palette"
 title = "Command Palette"
