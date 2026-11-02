@@ -1,14 +1,12 @@
 //! Turns action specs into the tab-separated rows fzf displays.
 
 use crate::config::{Colors, RESET};
-use serde::{Deserialize, Serialize};
-use std::{env, fs};
 
 pub const SEPARATOR: &str = "__group__";
 const KEY_WIDTH: usize = 16;
 
 /// An action flattened to plain data, so re-rendering per keystroke stays cheap.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Spec {
     pub id: String,
     pub cat: String,
@@ -19,24 +17,7 @@ pub struct Spec {
     pub teach: bool,
 }
 
-/// What the per-keystroke `--rows` reload reads back from disk.
-#[derive(Serialize, Deserialize)]
-pub struct Cache {
-    pub specs: Vec<Spec>,
-    pub colors: Colors,
-}
-
 pub type Row = (String, String);
-
-pub fn terminal_width() -> usize {
-    // COLUMNS first: the --rows reload runs with no tty of its own, and fzf
-    // exports the popup's width into the child's environment.
-    env::var("COLUMNS")
-        .ok()
-        .and_then(|c| c.parse().ok())
-        .or_else(|| terminal_size::terminal_size().map(|(w, _)| w.0 as usize))
-        .unwrap_or(100)
-}
 
 pub fn strip_ansi(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
@@ -213,24 +194,6 @@ pub fn render_rows(specs: &[Spec], query: &str, width: usize, colors: &Colors) -
     rows
 }
 
-pub fn encode_rows(rows: &[Row]) -> String {
-    rows.iter().map(|(value, display)| format!("{value}\t{display}")).collect::<Vec<_>>().join("\n")
-}
-
-/// `--rows <query>`: what fzf reloads on every keystroke.
-pub fn emit_rows(query: &str) -> i32 {
-    let Some(path) = env::var("HERDR_PALETTE_SPECS").ok().filter(|p| !p.is_empty()) else {
-        return 1;
-    };
-    let Some(cache) =
-        fs::read_to_string(path).ok().and_then(|text| serde_json::from_str::<Cache>(&text).ok())
-    else {
-        return 1;
-    };
-    println!("{}", encode_rows(&render_rows(&cache.specs, query, terminal_width(), &cache.colors)));
-    0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,20 +351,5 @@ mod tests {
         let long = "x".repeat(200);
         let rows = render_rows(&[spec("a", "pane", &long, "")], "", 20, &colors());
         assert_eq!(rows[2].1.chars().count(), 84);
-    }
-
-    #[test]
-    fn encode_joins_value_and_display_with_tabs() {
-        let rows = vec![("a".to_string(), "x".to_string()), ("b".to_string(), "y".to_string())];
-        assert_eq!(encode_rows(&rows), "a\tx\nb\ty");
-    }
-
-    #[test]
-    fn cache_round_trips_through_json() {
-        let cache = Cache { specs: vec![spec("a", "pane", "Zoom", "^b z")], colors: colors() };
-        let json = serde_json::to_string(&cache).unwrap();
-        let back: Cache = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.specs, cache.specs);
-        assert_eq!(back.colors.key, "<K>");
     }
 }

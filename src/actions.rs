@@ -538,7 +538,7 @@ mod tests {
     use serde_json::json;
 
     fn init() {
-        init_settings(Settings { colors: Colors::default(), glyphs: Glyphs::default(), fzf_colors: vec![] });
+        init_settings(Settings { colors: Colors::default(), glyphs: Glyphs::default(), highlight: String::new() });
     }
 
     fn snapshot() -> Snapshot {

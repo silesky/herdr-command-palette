@@ -1,6 +1,5 @@
 //! Herdr config, plugin config, theme colors, and agent status glyphs.
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -12,7 +11,7 @@ const DEFAULT_DIM: &str = "\x1b[2m";
 
 pub const DEFAULT_GROUP_ORDER: [&str; 5] = ["agents", "workspaces", "actions", "custom", "plugins"];
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Colors {
     pub key: String,
     pub dim: String,
@@ -57,6 +56,11 @@ pub fn apply_theme_colors(config: &Table, colors: &mut Colors) {
             *slot = ansi;
         }
     }
+}
+
+/// Same as `hex_to_ansi`, for the background.
+pub fn hex_to_ansi_bg(hex: &str) -> String {
+    hex_to_ansi(hex).replacen("[38;", "[48;", 1)
 }
 
 pub fn load_toml(path: &Path) -> Table {
@@ -181,7 +185,8 @@ pub fn status_rank(status: &str) -> usize {
 pub struct Settings {
     pub colors: Colors,
     pub glyphs: Glyphs,
-    pub fzf_colors: Vec<String>,
+    /// ANSI background for the selected row.
+    pub highlight: String,
 }
 
 static SETTINGS: OnceLock<Settings> = OnceLock::new();
@@ -202,6 +207,12 @@ mod tests {
     fn hex_converts_to_truecolor() {
         assert_eq!(hex_to_ansi("#ff8000"), "\x1b[38;2;255;128;0m");
         assert_eq!(hex_to_ansi("ff8000"), "\x1b[38;2;255;128;0m");
+    }
+
+    #[test]
+    fn hex_background_uses_the_48_code() {
+        assert_eq!(hex_to_ansi_bg("#010203"), "\x1b[48;2;1;2;3m");
+        assert_eq!(hex_to_ansi_bg("nope"), "");
     }
 
     #[test]

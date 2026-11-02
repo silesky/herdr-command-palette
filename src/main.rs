@@ -5,17 +5,18 @@ mod config;
 mod context;
 mod herdr;
 mod keymap;
+mod picker;
 mod render;
 mod ui;
 
 use actions::{group_actions, Action, Snapshot};
 use config::{
-    apply_theme_colors, herdr_config_path, init_settings, load_toml, settings, Colors, PluginConfig,
-    Settings, RESET,
+    apply_theme_colors, herdr_config_path, hex_to_ansi_bg, init_settings, load_toml, settings,
+    theme_color, Colors, PluginConfig, Settings, RESET,
 };
 use herdr::{herdr_bin, herdr_quiet, is_runnable, which};
 use keymap::{Keymap, ModStyle};
-use render::{render_rows, terminal_width, Cache, SEPARATOR};
+use render::render_rows;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
@@ -24,7 +25,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 use std::{env, fs, thread};
 
-// Set HERDR_PALETTE_TRACE=/tmp/some.log to time startup from process start to first paint.
+// Set HERDR_PALETTE_TRACE=/tmp/some.log to time startup from process start to the picker.
 fn trace(label: &str) {
     static START: OnceLock<Instant> = OnceLock::new();
     let start = *START.get_or_init(Instant::now);
@@ -73,7 +74,7 @@ fn repair_path() {
     }
     // Anything the list above cannot guess (asdf, a custom prefix) is worth a
     // login shell, but only once the free lookup has already missed.
-    if which("fzf").is_none() {
+    if which("herdr").is_none() && env::var_os("HERDR_BIN_PATH").is_none() {
         let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let output = Command::new(shell).args(["-lc", "printf %s \"$PATH\""]).output();
         if let Ok(output) = output {
@@ -94,19 +95,7 @@ fn collect(handle: thread::JoinHandle<Value>) -> Value {
 }
 
 fn run() -> ExitCode {
-    let args: Vec<String> = env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--rows") {
-        let query = args.get(2).map_or("", String::as_str);
-        return if render::emit_rows(query) == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE };
-    }
-
     repair_path();
-    if which("fzf").is_none() {
-        return fatal(
-            "herdr-palette requires fzf on PATH.",
-            "Install fzf, or start the Herdr server from a login shell so it inherits your PATH.",
-        );
-    }
     // herdr_bin() falls back to a bare "herdr" when PATH is too thin to resolve it,
     // which would otherwise fail later as an empty palette rather than an error.
     if !is_runnable(herdr_bin()) {
@@ -130,7 +119,10 @@ fn run() -> ExitCode {
     init_settings(Settings {
         colors: colors.clone(),
         glyphs: plugin_config.glyphs(),
-        fzf_colors: ui::fzf_theme(&config),
+        highlight: theme_color(&config, "surface1")
+            .map(hex_to_ansi_bg)
+            .filter(|ansi| !ansi.is_empty())
+            .unwrap_or_else(|| "\x1b[48;5;238m".to_string()),
     });
     let keymap = Keymap::new(&config, &plugin_config.leader, ModStyle::resolve(&plugin_config.modifier_style));
     let ctx = context::load_context();
@@ -155,19 +147,13 @@ fn run() -> ExitCode {
     trace("actions built");
 
     let specs: Vec<_> = actions.iter().map(|a| a.spec(&keymap)).collect();
-    let rows = render_rows(&specs, "", terminal_width(), &colors);
-    // Bake resolved colors into the cache so the --rows reload path uses them.
-    let cache = Cache { specs, colors: colors.clone() };
-    trace("rows rendered, handing off to fzf");
+    trace("rows rendered, opening picker");
     let focus_id = ctx.pane_id.as_ref().map(|p| format!("agent:{p}"));
 
-    // Group headings are selectable in fzf; treat picking one as "keep looking".
-    let chosen = loop {
-        match ui::run_fzf(&rows, "", Some(&cache), focus_id.as_deref()) {
-            None => return ExitCode::SUCCESS,
-            Some(id) if id == SEPARATOR => continue,
-            Some(id) => break id,
-        }
+    let Some(chosen) = picker::run("", focus_id.as_deref(), |query, width| {
+        render_rows(&specs, query, width, &colors)
+    }) else {
+        return ExitCode::SUCCESS;
     };
     let Some(action) = index.get(&chosen).map(|&i| &actions[i]) else {
         return ExitCode::FAILURE;
