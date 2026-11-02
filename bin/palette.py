@@ -42,8 +42,6 @@ HERDR = os.environ.get("HERDR_BIN_PATH") or which("herdr") or "herdr"
 # to the same file, so the log spans from pane spawn to first paint.
 TRACE = os.environ.get("HERDR_PALETTE_TRACE")
 
-RELOAD_DEBOUNCE_SECS = "0.05"
-
 
 def trace(label: str) -> None:
     if not TRACE:
@@ -583,12 +581,9 @@ def run_fzf(
 
         down = "down" + on_sep("down") * 2
         up = "up" + on_sep("up") * 2 + on_sep("down+down")
-        # fzf kills an in-flight reload when the next change fires, so the
-        # leading sleep debounces: a burst of keystrokes spawns one interpreter
-        # for the last query instead of one per key.
         swap = [
             "--disabled",
-            f"--bind=change:reload(sleep {RELOAD_DEBOUNCE_SECS}; {script} --rows {{q}})",
+            f"--bind=change:reload({script} --rows {{q}})",
             # `result` fires after every reload. Only the unfiltered list opens
             # on the caller's agent row: once the user types, its old index
             # points at an unrelated row, so focus the first match instead.
